@@ -14,7 +14,7 @@ enum class TokenType {
 
 class Node {
 public:
-    Node(utils::InitArgs args) : client(args.nodePort, args.nextAddress, args.nextPort),
+    Node(utils::InitArgs args) : client(args.nodePort, args.nextAddress, args.nextPort, args.prob),
         m(0), ping(0), pong(0),
         state(NodeState::NO_TOKEN) {
 

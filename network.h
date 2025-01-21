@@ -3,8 +3,8 @@
 
 class NetworkClient {
 public:
-    NetworkClient(int nodePort, const std::string& nextAddress, int nextPort)
-        : nodePort(nodePort), nextAddress(nextAddress), nextPort(nextPort), isConnected(false) {}
+    NetworkClient(int nodePort, const std::string& nextAddress, int nextPort, float lossProbability)
+        : nodePort(nodePort), nextAddress(nextAddress), nextPort(nextPort), isConnected(false), lossProbability(lossProbability) {}
 
     ~NetworkClient() {
         closeConnection();
@@ -58,6 +58,12 @@ public:
 
     // Send a value to the next node in the ring
     bool send(int value) {
+
+        if (shouldLoseMessage()) {
+            std::cout << "Token lost: " << value << std::endl;
+            return true; 
+        }
+
         std::lock_guard<std::mutex> lock(connectionMutex);
         if (!isConnected) {
             if (!connectToNextNode()) {
@@ -93,6 +99,16 @@ private:
     std::atomic<bool> isConnected;
     std::mutex connectionMutex;
     std::function<void(int)> receiveCallback;
+    float lossProbability;
+
+    //generate token losing
+    bool shouldLoseMessage() {
+        static std::random_device rd;
+        static std::mt19937 gen(rd());
+        std::uniform_real_distribution<float> dis(0.0f, 100.0f);
+
+        return dis(gen) < lossProbability; // True if the message is lost
+    }
 
     // Connect to the next node in the ring
     bool connectToNextNode() {

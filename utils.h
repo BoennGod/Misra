@@ -8,11 +8,12 @@ struct InitArgs {
     bool isInit;                 
     std::string nextAddress;      
     int nodePort;               
-    int nextPort;               
+    int nextPort;
+    float prob;               
 
 
     InitArgs()
-        : isInit(false), nextAddress("127.0.0.1"), nodePort(8089), nextPort(8090) {}
+        : isInit(false), nextAddress("127.0.0.1"), nodePort(8089), nextPort(8090), prob(0.0) {}
 };
 
 
@@ -34,13 +35,25 @@ InitArgs ReadArguments(int argc, char* argv[]) {
             args.nextAddress = argv[++i];
         } else if (arg == "-next_port" && i + 1 < argc) {
             args.nextPort = std::stoi(argv[++i]);
+        } else if (arg == "-prob" && i + 1 < argc) {
+            try {
+                args.prob = std::stof(argv[++i]);
+            } catch (const std::exception& e) {
+                std::cerr << "Error: Invalid value for -prob. Must be a float between 0 and 100.\n";
+                exit(1);
+            }
         }
     }
 
     // Validate required arguments
     if (args.nextAddress.empty() || args.nextPort == 0) {
         std::cerr << "Gib params: ./program -next_ip <ip> -next_port <port>\n";
-        std::cerr << "All possibilities: ./program -initiator -node_port <port> -next_ip <ip> -next_port <port>\n";
+        std::cerr << "All possibilities: ./program -initiator -node_port <port> -next_ip <ip> -next_port <port> -prob <loss prob in float 0-100>\n";
+        exit(1);
+    }
+
+    if (args.prob < 0.0f || args.prob > 100.0f) {
+        std::cerr << "Error: Probability (-prob) must be between 0 and 100.\n";
         exit(1);
     }
 
