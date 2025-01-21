@@ -50,7 +50,7 @@ public:
                 continue;
             }
 
-            std::thread(&NetworkClient::handleConnection, this, clientSocket).detach();
+            std::thread(&NetworkClient::messageHandler, this, clientSocket).detach();
         }
 
         close(serverSocket);
@@ -121,7 +121,7 @@ private:
     }
 
     // Handle an incoming connection
-    void handleConnection(int clientSocket) {
+    void messageHandler(int clientSocket) {
         char buffer[1024];
 
         while (true) {

@@ -39,8 +39,8 @@ InitArgs ReadArguments(int argc, char* argv[]) {
 
     // Validate required arguments
     if (args.nextAddress.empty() || args.nextPort == 0) {
-        std::cerr << "Minimal usage: ./program -next_ip <ip> -next_port <port>\n";
-        std::cerr << "With all flags: ./program -initiator -node_port <port> -next_ip <ip> -next_port <port>\n";
+        std::cerr << "Gib params: ./program -next_ip <ip> -next_port <port>\n";
+        std::cerr << "All possibilities: ./program -initiator -node_port <port> -next_ip <ip> -next_port <port>\n";
         exit(1);
     }
 

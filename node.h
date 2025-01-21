@@ -97,17 +97,17 @@ private:
 
 
         if (utils::Abs(token) < m) {
-            printf("Received old token of value: %d\n", token);
+            printf("Received an old token, value: %d\n", token);
             return;
         }
 
         if (token == m) {
             if (m > 0) {
-                printf("Pong lost, regenerating...\n");
+                printf("regenerating Pong\n");
                 regenerate(token);
                 return;
             } else if (m < 0) {
-                printf("Ping lost, regenerating...\n");
+                printf("regenerating Ping\n");
                 regenerate(token);
                 return;
             }
@@ -120,7 +120,7 @@ private:
             } else if (state == NodeState::PONG_TOKEN) {
                 state = NodeState::BOTH_TOKENS;
             } else {
-                printf("What?");
+                printf("How did we get here, token > 0?");
             }
         } else if (token < 0) {
             incarnate(token);
@@ -129,7 +129,7 @@ private:
             } else if (state == NodeState::PING_TOKEN) {
                 state = NodeState::BOTH_TOKENS;
             } else {
-                printf("What?");
+                printf("How did we get here, token < 0?");
             }
         }
     }
