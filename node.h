@@ -1,23 +1,17 @@
 #include "utils.h"
-
-enum class NodeState {
-    NO_TOKEN,
-    PING_TOKEN,
-    PONG_TOKEN,
-    BOTH_TOKENS
-};
-
-enum class TokenType {
-    PING,
-    PONG
-};
+#include <atomic>
+#include <thread>
+#include <iostream>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <csignal>
 
 class Node {
 public:
     Node(utils::InitArgs args) : client(args.nodePort, args.nextAddress, args.nextPort, args.prob),
-        m(0), ping(0), pong(0),
-        state(NodeState::NO_TOKEN) {
-
+                                 ping(1), pong(-1), m(0),
+                                 HAS_PING(false) {
 
         client.setReceiveCallback([this](int token) {
             std::lock_guard<std::mutex> lock(tokenMutex);
@@ -27,24 +21,29 @@ public:
 
         if (args.isInit) {
             printf("Node is initiator, sending initial tokens...\n");
-            send(TokenType::PING);
-            send(TokenType::PONG);
-            state = NodeState::BOTH_TOKENS;
+            ping = 1;
+            pong = -1;
+            m = 0;
+            sendToken(ping);
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            sendToken(pong);
         }
+
+        setupSignalHandler();
     }
 
     void start() {
         std::thread(&Node::listen, this).detach();
-        std::thread(&Node::handleState, this).detach();
         std::thread(&Node::processTokens, this).detach();
     }
 
 private:
     NetworkClient client;
-    int m;
+    std::atomic<bool> HAS_PING;
+    std::atomic<bool> HAS_PONG;
     int ping;
     int pong;
-    NodeState state;
+    int m;
     std::queue<int> tokenQueue;
     std::mutex tokenMutex;
     std::condition_variable tokenCondition;
@@ -53,123 +52,137 @@ private:
         client.listen();
     }
 
-    void handleState() {
-        while (true) {
-            switch (state) {
-            case NodeState::NO_TOKEN:
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                break;
-            case NodeState::PING_TOKEN:  
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-                send(TokenType::PING);
-                break;
-            case NodeState::PONG_TOKEN:
-                send(TokenType::PONG);
-                break;
-            case NodeState::BOTH_TOKENS:
-                incarnate(ping);
-                send(TokenType::PING);
-                send(TokenType::PONG);
-                break;
-            }
-        }
+    void processTokens() {
+        std::thread(&Node::processPingTokens, this).detach();
+        std::thread(&Node::processPongTokens, this).detach();
     }
 
-    void processTokens() {
+    void processPingTokens() {
         while (true) {
             std::unique_lock<std::mutex> lock(tokenMutex);
             tokenCondition.wait(lock, [this]() { return !tokenQueue.empty(); });
 
-            int token = tokenQueue.front();
-            tokenQueue.pop();
-            lock.unlock();
-
-            processToken(token);
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            if (tokenQueue.front() > 0) {  // Process ping
+                int token = tokenQueue.front();
+                tokenQueue.pop();
+                lock.unlock();
+                handlePing(token);
+            } else {
+                tokenCondition.notify_one();
+            }
         }
     }
 
-    void processToken(int token) {
-        // token < m: ignore
-        // token == m: ping or pong lost
-        // token > 0 save as ping
-        // token < 0 save as pong
+    void processPongTokens() {
+        while (true) {
+            std::unique_lock<std::mutex> lock(tokenMutex);
+            tokenCondition.wait(lock, [this]() { return !tokenQueue.empty(); });
+
+            if (tokenQueue.front() < 0) {  // Process pong
+                int token = tokenQueue.front();
+                tokenQueue.pop();
+                lock.unlock();
+                handlePong(token);
+            } else {
+                tokenCondition.notify_one();
+            }
+        }
+}
+
+    void handlePing(int token) {
+        std::thread([this, token]() {
+            if (std::abs(token) < std::abs(m)) {
+                printf("Received old token, ignoring\n");
+                return;
+            }
+            HAS_PING = true;
+            ping = token;
 
 
-        if (utils::Abs(token) < m) {
-            printf("Received an old token, value: %d\n", token);
+            if (HAS_PING && HAS_PONG){
+                incarnate(token);
+            }
+            if (token == m && !HAS_PONG){
+                printf("Pong lost\n");
+                printf("ping: %d, pong: %d, m: %d \n", ping, pong, m);
+                regenerate(ping);
+                sendToken(pong);
+            }
+
+            printf("\n|||Entering critical section\n\n");
+            std::this_thread::sleep_for(std::chrono::seconds(10));
+            printf("\n|||Leaving critical section\n\n");
+            
+            sendToken(ping); // Send the current value of ping
+        }).detach();
+    }
+
+    void handlePong(int token) {
+        
+        std::thread([this, token]() {
+            if (std::abs(token) < std::abs(m)) {
+            printf("Received old token, ignoring\n");
             return;
-        }
+            }
+            HAS_PONG = true;
+            pong = token;
 
-        if (token == m) {
-            if (m > 0) {
-                printf("regenerating Pong\n");
-                regenerate(token);
-                return;
-            } else if (m < 0) {
-                printf("regenerating Ping\n");
-                regenerate(token);
-                return;
+            if (HAS_PING && HAS_PONG){
+                incarnate(token);
             }
-        }
 
-        if (token > 0) {
-            incarnate(token);
-            if (state == NodeState::NO_TOKEN) {
-                state = NodeState::PING_TOKEN;
-            } else if (state == NodeState::PONG_TOKEN) {
-                state = NodeState::BOTH_TOKENS;
-            } else {
-                printf("How did we get here, token > 0?");
+            if (token == m && !HAS_PING){
+                printf("Ping lost\n");
+                printf("ping: %d, pong: %d, m: %d \n", ping, pong, m);
+                regenerate(pong);
+                sendToken(ping);
             }
-        } else if (token < 0) {
-            incarnate(token);
-            if (state == NodeState::NO_TOKEN) {
-                state = NodeState::PONG_TOKEN;
-            } else if (state == NodeState::PING_TOKEN) {
-                state = NodeState::BOTH_TOKENS;
-            } else {
-                printf("How did we get here, token < 0?");
-            }
-        }
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            
+            sendToken(pong); // Send the current value of pong
+        }).detach();
+         
     }
 
-    void send(TokenType tokenType) {
-        int token = (tokenType == TokenType::PING) ? ping : pong;
+    void sendToken(int token) {
+        if (token < 0){
+            HAS_PONG = false;
+        } else if (token > 0){
+            HAS_PING = false;
+        }
+        m = token;
         if (!client.send(token)) {
             printf("Error sending token: %d\n", token);
             disconnect();
         } else {
-            m = token;
-            printf("Token: %d sent successfully\n", token);
-
-            if (state == NodeState::PING_TOKEN && tokenType == TokenType::PING) {
-                state = NodeState::NO_TOKEN;
-            } else if (state == NodeState::PONG_TOKEN && tokenType == TokenType::PONG) {
-                state = NodeState::NO_TOKEN;
-            } else if (state == NodeState::BOTH_TOKENS) {
-                state = (tokenType == TokenType::PING) ? NodeState::PONG_TOKEN : NodeState::PING_TOKEN;
-            }
+            printf("Token: %d sent successfully                           m value: %d \n", token, m);
         }
-    }
-
-    void regenerate(int value) {
-        ping = utils::Abs(value);
-        pong = -ping;
-        state = NodeState::BOTH_TOKENS;
-        printf("Regenerated ping: %d, pong: %d\n", ping, pong);
     }
 
     void incarnate(int value) {
         ping = utils::Abs(value) + 1;
         pong = -ping;
-        printf("Incarnated ping: %d, pong: %d\n", ping, pong);
+        printf("Incarnated! ping: %d, pong: %d\n", ping, pong);
+    }
+
+    void regenerate(int value) {
+        ping = utils::Abs(value);
+        pong = -ping;
+        printf("Regenerated! ping: %d, pong: %d\n", ping, pong);
     }
 
     void disconnect() {
         if (!client.closeConnection()) {
-            printf("Error closing client connection.");
+            printf("Error closing client connection.\n");
         }
         std::exit(1);
     }
+
+    void setupSignalHandler() {
+    std::signal(SIGINT, [](int) {
+        printf("\nGracefully shutting down...\n");
+        // client.closeConnection();
+        std::exit(0);
+    });
+}
 };

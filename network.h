@@ -58,8 +58,7 @@ public:
 
     // Send a value to the next node in the ring
     bool send(int value) {
-
-        if (shouldLoseMessage()) {
+        if (shouldLoseMessage(value)) {
             std::cout << "Token lost: " << value << std::endl;
             return true; 
         }
@@ -72,12 +71,14 @@ public:
         }
 
         std::string message = std::to_string(value) + "\n";
-        if (::send(nextSocket, message.c_str(), message.size(), 0) < 0) {
+        ssize_t sent = ::send(nextSocket, message.c_str(), message.size(), 0);
+        if (sent < 0) {
             perror("Error sending message");
             closeConnection();
             return false;
         }
 
+        // std::cout << "Sent token: " << value << std::endl;  // Add logging
         return true;
     }
 
@@ -102,7 +103,10 @@ private:
     float lossProbability;
 
     //generate token losing
-    bool shouldLoseMessage() {
+    bool shouldLoseMessage(int value) {
+        if (value > 0){
+            return false;
+        }
         static std::random_device rd;
         static std::mt19937 gen(rd());
         std::uniform_real_distribution<float> dis(0.0f, 100.0f);
@@ -159,6 +163,7 @@ private:
 
             try {
                 int value = std::stoi(message);
+                printf("received token: %d\n", value);
                 if (receiveCallback) {
                     receiveCallback(value);
                 }

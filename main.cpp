@@ -38,3 +38,6 @@ int main(int argc, char* argv[]) {
     
     return 0;
 }
+
+//g++ main.cpp -o my_program -pthread
+//./my_program -initiator -node_port 8081 -next_ip 127.0.0.1 -next_port 8082
